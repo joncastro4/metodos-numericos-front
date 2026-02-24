@@ -13,6 +13,8 @@ interface Iteracion {
   paso?: number;
   x: number;
   y: number;
+  yr?: number;
+  "error_%"?: number;
 }
 
 interface ApiResponse {
@@ -25,20 +27,11 @@ interface ApiResponse {
 const asciiToPython = (ascii: string): string => {
   let expr = ascii;
 
-  // Añadir * implícito entre variable/número y función matemática
   expr = expr.replace(/(\w)\s+(sqrt|sin|cos|tan|exp|log|ln)\s*\(/g, '$1 * $2(');
-
-  // Añadir * implícito: 2x → 2*x, 2( → 2*(
   expr = expr.replace(/(\d)([a-zA-Z(])/g, '$1*$2');
-
-  // Añadir * implícito: )x → )*x, )( → )*(
   expr = expr.replace(/\)([a-zA-Z])/g, ')*$1');
   expr = expr.replace(/\)\s*\(/g, ')*(');
-
-  // Potencias: ^ → **
   expr = expr.replace(/\^/g, '**');
-
-  // ln → log (Python usa math.log para logaritmo natural)
   expr = expr.replace(/\bln\b/g, 'log');
 
   return expr;
@@ -118,6 +111,10 @@ const HeunComponent = () => {
   const xMax = xs.length ? Math.max(...xs) + pad : 3;
   const yMin = ys.length ? Math.min(...ys) - pad : -1;
   const yMax = ys.length ? Math.max(...ys) + pad : 3;
+
+  // Detect whether the data includes yr / error_% columns
+  const hasYr = puntos.some(p => p.yr !== undefined);
+  const hasError = puntos.some(p => p["error_%"] !== undefined);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', fontFamily: "'Inter', system-ui, sans-serif", color: '#1e293b' }}>
@@ -230,6 +227,9 @@ const HeunComponent = () => {
         .td-y { color: #0f172a; font-weight: 500; }
         .td-delta { color: #16a34a; font-size: 0.82rem; }
         .td-delta-zero { color: #94a3b8; font-size: 0.82rem; }
+        .td-yr { color: #7c3aed; font-weight: 500; }
+        .td-error { color: #dc2626; font-size: 0.82rem; }
+        .td-error-zero { color: #94a3b8; font-size: 0.82rem; }
 
         .hc-graph-wrap { border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; margin-top: 4px; }
         .hc-graph-legend { display: flex; gap: 18px; margin-top: 12px; font-size: 0.78rem; color: #64748b; }
@@ -383,6 +383,8 @@ const HeunComponent = () => {
                       <th>x</th>
                       <th>y (aprox.)</th>
                       <th>Δy</th>
+                      {hasYr && <th>y real</th>}
+                      {hasError && <th>Error (%)</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -390,12 +392,22 @@ const HeunComponent = () => {
                       const delta = i === 0 ? null : p.y - puntos[i - 1].y;
                       return (
                         <tr key={i}>
-                          <td className="td-step">{i}</td>
+                          <td className="td-step">{p.paso ?? i}</td>
                           <td className="td-x">{p.x.toFixed(4)}</td>
                           <td className="td-y">{p.y.toFixed(6)}</td>
                           <td className={delta !== null ? 'td-delta' : 'td-delta-zero'}>
-                            {delta !== null ? `+${delta.toFixed(6)}` : '—'}
+                            {delta !== null ? (delta >= 0 ? `+${delta.toFixed(6)}` : delta.toFixed(6)) : '—'}
                           </td>
+                          {hasYr && (
+                            <td className="td-yr">
+                              {p.yr !== undefined ? p.yr.toFixed(6) : '—'}
+                            </td>
+                          )}
+                          {hasError && (
+                            <td className={p["error_%"] !== undefined && p["error_%"] > 0 ? 'td-error' : 'td-error-zero'}>
+                              {p["error_%"] !== undefined ? `${p["error_%"].toFixed(6)}%` : '—'}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}

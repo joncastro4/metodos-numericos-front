@@ -45,7 +45,7 @@ const NewtonRaphsonComponent = () => {
   const [pythonFormula, setPythonFormula] = useState<string>("");
   const [x0,           setX0]           = useState<string>("1");
   const [toleranciaFx, setToleranciaFx] = useState<string>("1e-7");
-  const maxIter = "10000";
+  const maxIter = "1000";
   const [resultado,    setResultado]    = useState<ApiResponse | null>(null);
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState<string>("");
@@ -109,18 +109,24 @@ const NewtonRaphsonComponent = () => {
   const xMax = xs.length ? Math.max(...xs) + pad : 4;
 
   const fn = pythonFormula ? buildFn(pythonFormula) : null;
+
+  // Filtrar valores no finitos y extremos para evitar RangeError en Mafs
   const ys_fn: number[] = fn
     ? Array.from({ length: 80 }, (_, i) => {
         const x = xMin + (i / 79) * (xMax - xMin);
         return fn(x);
-      }).filter(y => isFinite(y))
+      }).filter(y => isFinite(y) && Math.abs(y) < 1e6)
     : [];
-  const yMin_fn = ys_fn.length ? Math.min(...ys_fn) - 1 : -4;
-  const yMax_fn = ys_fn.length ? Math.max(...ys_fn) + 1 :  4;
+
+  const Y_CLAMP = 50;
+  const yMin_raw = ys_fn.length ? Math.min(...ys_fn) - 1 : -4;
+  const yMax_raw = ys_fn.length ? Math.max(...ys_fn) + 1 :  4;
+  const yMin_fn = Math.max(-Y_CLAMP, isFinite(yMin_raw) ? yMin_raw : -4);
+  const yMax_fn = Math.min( Y_CLAMP, isFinite(yMax_raw) ? yMax_raw :  4);
 
   // Puntos de iteración sobre la curva
   const iterPts: [number, number][] = hist
-    .filter(h => fn && isFinite(fn(h.xn)))
+    .filter(h => fn && isFinite(fn(h.xn)) && Math.abs(fn(h.xn)) < 1e6)
     .map(h => [h.xn, fn!(h.xn)] as [number, number]);
 
   return (
@@ -372,7 +378,7 @@ const NewtonRaphsonComponent = () => {
                       for (let i = 0; i <= 200; i++) {
                         const x = xMin + (i / 200) * (xMax - xMin);
                         const y = fn(x);
-                        if (isFinite(y)) pts.push([x, y]);
+                        if (isFinite(y) && Math.abs(y) < 1e6) pts.push([x, y]);
                       }
                       return pts.length > 1 ? (
                         <Polyline points={pts} color="#6366f1" />
@@ -381,7 +387,7 @@ const NewtonRaphsonComponent = () => {
 
                     {/* Líneas verticales de cada xn hacia el eje x */}
                     {hist.map((h, i) =>
-                      fn && isFinite(fn(h.xn)) ? (
+                      fn && isFinite(fn(h.xn)) && Math.abs(fn(h.xn)) < 1e6 ? (
                         <Polyline
                           key={`drop-${i}`}
                           points={[[h.xn, 0], [h.xn, fn(h.xn)]] as vec.Vector2[]}
@@ -411,7 +417,7 @@ const NewtonRaphsonComponent = () => {
                   <span><span className="nr-legend-dot" style={{ background: '#10b981' }} />Raíz encontrada</span>
                 </div>
               </div>
-              
+
               {/* Tabla de iteraciones */}
               <div className="nr-card">
                 <p className="nr-card-title">Tabla de iteraciones</p>
