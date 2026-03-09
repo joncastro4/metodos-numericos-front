@@ -11,16 +11,17 @@ type MathfieldElement = HTMLElement & {
 
 interface Iteracion {
   paso?: number;
-  x: number;
-  y: number;
-  yr?: number;
-  "error_%"?: number;
+  x: number | null;
+  y: number | null;
+  yr?: number | null;
+  "error_%"?: number | null;
 }
 
 interface ApiResponse {
   iteraciones: Iteracion[];
   resultado_final: number;
   status: string;
+  advertencia?: string | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -36,6 +37,10 @@ const asciiToPython = (ascii: string): string => {
 
   return expr;
 };
+
+// ─── Safe formatter ───────────────────────────────────────────────────────────
+const fmt = (val: number | null | undefined, decimals = 6): string =>
+  val == null ? '—' : val.toFixed(decimals);
 
 // ─── Component ───────────────────────────────────────────────────────────────
 const HeunComponent = () => {
@@ -87,7 +92,7 @@ const HeunComponent = () => {
       const data: ApiResponse = await response.json();
       const seen = new Set<number>();
       const unique = data.iteraciones.filter(p => {
-        if (seen.has(p.x)) return false;
+        if (p.x == null || seen.has(p.x)) return false;
         seen.add(p.x);
         return true;
       });
@@ -103,18 +108,34 @@ const HeunComponent = () => {
     }
   };
 
-  const puntos = resultado?.iteraciones ?? [];
+  // Only use points where x and y are finite for the graph (diverged values crash Mafs)
+  const MAX_GRAPH_VALUE = 1e6;
+  const puntos = (resultado?.iteraciones ?? []).filter(
+    (p): p is Iteracion & { x: number; y: number } =>
+      p.x != null && p.y != null &&
+      isFinite(p.x) && isFinite(p.y) &&
+      Math.abs(p.y) <= MAX_GRAPH_VALUE
+  );
   const xs = puntos.map(p => p.x);
   const ys = puntos.map(p => p.y);
   const pad = 0.6;
-  const xMin = xs.length ? Math.min(...xs) - pad : -1;
-  const xMax = xs.length ? Math.max(...xs) + pad : 3;
-  const yMin = ys.length ? Math.min(...ys) - pad : -1;
-  const yMax = ys.length ? Math.max(...ys) + pad : 3;
+  const rawXMin = xs.length ? Math.min(...xs) - pad : -1;
+  const rawXMax = xs.length ? Math.max(...xs) + pad : 3;
+  const rawYMin = ys.length ? Math.min(...ys) - pad : -1;
+  const rawYMax = ys.length ? Math.max(...ys) + pad : 3;
+  // Clamp to prevent Mafs from generating impossibly large axis label arrays
+  const GRAPH_LIMIT = 1e4;
+  const xMin = Math.max(rawXMin, -GRAPH_LIMIT);
+  const xMax = Math.min(rawXMax,  GRAPH_LIMIT);
+  const yMin = Math.max(rawYMin, -GRAPH_LIMIT);
+  const yMax = Math.min(rawYMax,  GRAPH_LIMIT);
 
   // Detect whether the data includes yr / error_% columns
   const hasYr = puntos.some(p => p.yr !== undefined);
   const hasError = puntos.some(p => p["error_%"] !== undefined);
+
+  // All rows (including ones with null x/y) for the table
+  const allRows = resultado?.iteraciones ?? [];
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8fafc', fontFamily: "'Inter', system-ui, sans-serif", color: '#1e293b' }}>
@@ -335,13 +356,26 @@ const HeunComponent = () => {
         {/* Results */}
         {resultado && (
           <>
+            {/* Divergence warning */}
+            {resultado.advertencia && (
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                background: '#fefce8', border: '1px solid #fde047', borderRadius: 10,
+                padding: '14px 16px', color: '#854d0e', fontSize: '0.875rem',
+                lineHeight: 1.5, marginBottom: 16,
+              }}>
+                <span>⚠</span>
+                <span>{resultado.advertencia}</span>
+              </div>
+            )}
+
             {/* Badge */}
             <div className="hc-result-badge">
               <div>
                 <div className="hc-result-label">Resultado final</div>
                 <div className="hc-result-eq">y({xFin}) ≈</div>
               </div>
-              <div className="hc-result-value">{resultado.resultado_final.toFixed(6)}</div>
+              <div className="hc-result-value">{fmt(resultado.resultado_final)}</div>
             </div>
 
             {/* Graph */}
@@ -388,24 +422,23 @@ const HeunComponent = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {puntos.map((p, i) => {
-                      const delta = i === 0 ? null : p.y - puntos[i - 1].y;
+                    {allRows.map((p, i) => {
+                      const prevY = i === 0 ? null : allRows[i - 1].y;
+                      const delta = (p.y != null && prevY != null) ? p.y - prevY : null;
                       return (
                         <tr key={i}>
                           <td className="td-step">{p.paso ?? i}</td>
-                          <td className="td-x">{p.x.toFixed(4)}</td>
-                          <td className="td-y">{p.y.toFixed(6)}</td>
+                          <td className="td-x">{fmt(p.x, 4)}</td>
+                          <td className="td-y">{fmt(p.y)}</td>
                           <td className={delta !== null ? 'td-delta' : 'td-delta-zero'}>
-                            {delta !== null ? (delta >= 0 ? `+${delta.toFixed(6)}` : delta.toFixed(6)) : '—'}
+                            {delta !== null ? (delta >= 0 ? `+${fmt(delta)}` : fmt(delta)) : '—'}
                           </td>
                           {hasYr && (
-                            <td className="td-yr">
-                              {p.yr !== undefined ? p.yr.toFixed(6) : '—'}
-                            </td>
+                            <td className="td-yr">{fmt(p.yr)}</td>
                           )}
                           {hasError && (
-                            <td className={p["error_%"] !== undefined && p["error_%"] > 0 ? 'td-error' : 'td-error-zero'}>
-                              {p["error_%"] !== undefined ? `${p["error_%"].toFixed(6)}%` : '—'}
+                            <td className={p["error_%"] != null && p["error_%"] > 0 ? 'td-error' : 'td-error-zero'}>
+                              {p["error_%"] != null ? `${fmt(p["error_%"])}%` : '—'}
                             </td>
                           )}
                         </tr>
